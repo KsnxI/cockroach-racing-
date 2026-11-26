@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { z } = require('zod');
 
 const prisma = require('../db');
@@ -10,14 +11,25 @@ const { paginationSchema, buildMeta } = require('../utils/pagination');
 
 const router = express.Router();
 
+const MAX_ENTRIES = 8;
+
+// seed скрыт, пока заезд не завершён (иначе можно заранее посчитать результат)
+const publicRace = (race) => {
+  if (race.status === 'FINISHED') return race;
+  const { seed, ...rest } = race;
+  return rest;
+};
+
+const futureDate = z.coerce.date().refine((d) => d > new Date(), 'startsAt must be in the future');
+
 const createSchema = z.object({
   title: z.string().min(3).max(60),
-  startsAt: z.coerce.date().refine((d) => d > new Date(), 'startsAt must be in the future'),
+  startsAt: futureDate,
 });
 const updateSchema = z
   .object({
     title: z.string().min(3).max(60).optional(),
-    startsAt: z.coerce.date().refine((d) => d > new Date(), 'startsAt must be in the future').optional(),
+    startsAt: futureDate.optional(),
   })
   .refine((v) => v.title || v.startsAt, 'Provide title or startsAt');
 const listSchema = paginationSchema.extend({
@@ -26,12 +38,22 @@ const listSchema = paginationSchema.extend({
   to: z.coerce.date().optional(),
   order: z.enum(['asc', 'desc']).default('asc'),
 });
+const enterSchema = z.object({ racerId: z.string().min(1) });
+const oddsSchema = z.object({
+  odds: z.number().min(1.1).max(50).transform((v) => Math.round(v * 100) / 100),
+});
 
-//проверка заезд существует, создан этим букмекером и ещё не начался
-async function getEditableRace(id, userId) {
+// заезд существует и создан этим букмекером
+async function getCreatedRace(id, userId) {
   const race = await prisma.race.findUnique({ where: { id } });
   if (!race) throw new ApiError(404, 'Race not found');
   if (race.createdById !== userId) throw new ApiError(403, 'You are not the creator of this race');
+  return race;
+}
+
+// то же + заезд ещё не начался (для изменения и удаления)
+async function getEditableRace(id, userId) {
+  const race = await getCreatedRace(id, userId);
   if (race.status !== 'SCHEDULED') throw new ApiError(409, 'Only scheduled races can be changed');
   return race;
 }
@@ -58,7 +80,7 @@ router.get(
       }),
       prisma.race.count({ where }),
     ]);
-    res.json({ success: true, data: items, meta: buildMeta(page, limit, total) });
+    res.json({ success: true, data: items.map(publicRace), meta: buildMeta(page, limit, total) });
   })
 );
 
@@ -68,10 +90,14 @@ router.get(
   asyncHandler(async (req, res) => {
     const race = await prisma.race.findUnique({
       where: { id: req.params.id },
-      include: { entries: { include: { racer: { select: { id: true, name: true, speed: true, stamina: true, luck: true } } } } },
+      include: {
+        entries: {
+          include: { racer: { select: { id: true, name: true, speed: true, stamina: true, luck: true } } },
+        },
+      },
     });
     if (!race) throw new ApiError(404, 'Race not found');
-    res.json({ success: true, data: race });
+    res.json({ success: true, data: publicRace(race) });
   })
 );
 
@@ -84,7 +110,7 @@ router.post(
     const race = await prisma.race.create({
       data: { title: req.body.title, startsAt: req.body.startsAt, createdById: req.user.id },
     });
-    res.status(201).json({ success: true, data: race });
+    res.status(201).json({ success: true, data: publicRace(race) });
   })
 );
 
@@ -96,7 +122,7 @@ router.patch(
   asyncHandler(async (req, res) => {
     await getEditableRace(req.params.id, req.user.id);
     const race = await prisma.race.update({ where: { id: req.params.id }, data: req.body });
-    res.json({ success: true, data: race });
+    res.json({ success: true, data: publicRace(race) });
   })
 );
 
@@ -108,6 +134,91 @@ router.delete(
     await getEditableRace(req.params.id, req.user.id);
     await prisma.race.delete({ where: { id: req.params.id } });
     res.status(204).send();
+  })
+);
+
+
+router.post(
+  '/:id/entries',
+  auth,
+  validate(enterSchema),
+  asyncHandler(async (req, res) => {
+    const race = await prisma.race.findUnique({ where: { id: req.params.id } });
+    if (!race) throw new ApiError(404, 'Race not found');
+    if (race.status !== 'SCHEDULED') throw new ApiError(409, 'Entries are closed for this race');
+
+    const racer = await prisma.racer.findUnique({ where: { id: req.body.racerId } });
+    if (!racer) throw new ApiError(404, 'Racer not found');
+    if (racer.ownerId !== req.user.id) throw new ApiError(403, 'You are not the owner of this racer');
+
+    const count = await prisma.raceEntry.count({ where: { raceId: race.id } });
+    if (count >= MAX_ENTRIES) throw new ApiError(409, 'Race is full');
+
+
+    const entry = await prisma.raceEntry.create({ data: { raceId: race.id, racerId: racer.id } });
+    res.status(201).json({ success: true, data: entry });
+  })
+);
+
+
+router.delete(
+  '/:id/entries/:entryId',
+  auth,
+  asyncHandler(async (req, res) => {
+    const entry = await prisma.raceEntry.findFirst({
+      where: { id: req.params.entryId, raceId: req.params.id },
+      include: { race: true, racer: true },
+    });
+    if (!entry) throw new ApiError(404, 'Entry not found');
+    if (entry.racer.ownerId !== req.user.id) throw new ApiError(403, 'You are not the owner of this racer');
+    if (entry.race.status !== 'SCHEDULED') throw new ApiError(409, 'Entries are closed for this race');
+    await prisma.raceEntry.delete({ where: { id: entry.id } });
+    res.status(204).send();
+  })
+);
+
+
+router.patch(
+  '/:id/entries/:entryId/odds',
+  auth,
+  requireRole('BOOKMAKER'),
+  validate(oddsSchema),
+  asyncHandler(async (req, res) => {
+    const race = await getCreatedRace(req.params.id, req.user.id);
+    if (!['SCHEDULED', 'BETTING_OPEN'].includes(race.status)) {
+      throw new ApiError(409, 'Odds can no longer be changed');
+    }
+    const entry = await prisma.raceEntry.findFirst({
+      where: { id: req.params.entryId, raceId: race.id },
+    });
+    if (!entry) throw new ApiError(404, 'Entry not found');
+    const updated = await prisma.raceEntry.update({
+      where: { id: entry.id },
+      data: { odds: req.body.odds },
+    });
+    res.json({ success: true, data: updated });
+  })
+);
+
+
+router.post(
+  '/:id/open-betting',
+  auth,
+  requireRole('BOOKMAKER'),
+  asyncHandler(async (req, res) => {
+    const race = await getCreatedRace(req.params.id, req.user.id);
+    if (race.status !== 'SCHEDULED') throw new ApiError(409, 'Betting can only be opened for scheduled races');
+    if (race.startsAt <= new Date()) throw new ApiError(409, 'Race start time has passed');
+    const entries = await prisma.raceEntry.count({ where: { raceId: race.id } });
+    if (entries < 2) throw new ApiError(409, 'At least 2 racers are required');
+
+    const seed = crypto.randomBytes(16).toString('hex');
+    const seedHash = crypto.createHash('sha256').update(seed).digest('hex');
+    const updated = await prisma.race.update({
+      where: { id: race.id },
+      data: { status: 'BETTING_OPEN', seed, seedHash },
+    });
+    res.json({ success: true, data: publicRace(updated) });
   })
 );
 

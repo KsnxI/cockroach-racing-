@@ -15,6 +15,8 @@ app.get('/health', (req, res) => res.json({ success: true, data: { status: 'ok' 
 app.use('/auth', require('./routes/auth'));
 app.use('/racers', require('./routes/racers'));
 app.use('/races', require('./routes/races'));
+app.use('/bets', require('./routes/bets'));
+app.use('/me', require('./routes/me'));
 
 app.use((req, res, next) => next(new ApiError(404, 'Route not found')));
 app.use(errorHandler);
