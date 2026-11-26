@@ -1,0 +1,127 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PLAYER
+  BOOKMAKER
+}
+
+enum RaceStatus {
+  SCHEDULED
+  BETTING_OPEN
+  RUNNING
+  FINISHED
+  CANCELLED
+}
+
+enum BetStatus {
+  PENDING
+  WON
+  LOST
+  REFUNDED
+}
+
+enum TxType {
+  SIGNUP_BONUS
+  BET
+  BET_WIN
+  REFUND
+  RACER_PURCHASE
+  TRAINING
+  PRIZE
+}
+
+model User {
+  id           String        @id @default(uuid())
+  email        String        @unique
+  passwordHash String
+  nickname     String        @unique
+  role         Role          @default(PLAYER)
+  balance      Int           @default(1000)
+  racers       Racer[]
+  bets         Bet[]
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+}
+
+model Racer {
+  id        String      @id @default(uuid())
+  ownerId   String
+  owner     User        @relation(fields: [ownerId], references: [id])
+  name      String
+  speed     Int         @default(5)
+  stamina   Int         @default(5)
+  luck      Int         @default(5)
+  energy    Int         @default(100)
+  wins      Int         @default(0)
+  races     Int         @default(0)
+  entries   RaceEntry[]
+  createdAt DateTime    @default(now())
+
+  @@index([ownerId])
+}
+
+model Race {
+  id          String      @id @default(uuid())
+  title       String
+  status      RaceStatus  @default(SCHEDULED)
+  startsAt    DateTime
+  seedHash    String?
+  seed        String?
+  commentary  Json?
+  createdById String
+  entries     RaceEntry[]
+  bets        Bet[]
+  createdAt   DateTime    @default(now())
+
+  @@index([status, startsAt])
+}
+
+model RaceEntry {
+  id         String  @id @default(uuid())
+  raceId     String
+  racerId    String
+  race       Race    @relation(fields: [raceId], references: [id], onDelete: Cascade)
+  racer      Racer   @relation(fields: [racerId], references: [id])
+  odds       Decimal @default(2.00) @db.Decimal(6, 2)
+  position   Int?
+  finishTime Int?
+  bets       Bet[]
+
+  @@unique([raceId, racerId])
+}
+
+model Bet {
+  id        String    @id @default(uuid())
+  userId    String
+  raceId    String
+  entryId   String
+  amount    Int
+  oddsAtBet Decimal   @db.Decimal(6, 2)
+  status    BetStatus @default(PENDING)
+  payout    Int       @default(0)
+  user      User      @relation(fields: [userId], references: [id])
+  race      Race      @relation(fields: [raceId], references: [id])
+  entry     RaceEntry @relation(fields: [entryId], references: [id])
+  createdAt DateTime  @default(now())
+
+  @@index([userId, status])
+}
+
+model Transaction {
+  id           String   @id @default(uuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  type         TxType
+  amount       Int
+  balanceAfter Int
+  createdAt    DateTime @default(now())
+
+  @@index([userId, createdAt])
+}
