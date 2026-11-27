@@ -16,14 +16,6 @@ describe('Races', () => {
     expect(ok.status).toBe(201);
     expect(ok.body.data.status).toBe('SCHEDULED');
     expect(ok.body.data.seed).toBeUndefined(); // seed скрыт до финиша
-
-      test('лидерборд возвращает топы тараканов и игроков', async () => {
-    const user = await registerUser();
-    const res = await request(app).get('/stats/leaderboard').set(user.auth);
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body.data.racers)).toBe(true);
-    expect(Array.isArray(res.body.data.players)).toBe(true);
-  });
   });
 
   test('заезд в прошлом: 400', async () => {
@@ -56,5 +48,13 @@ describe('Races', () => {
     expect(res.body.data).toHaveLength(1);
     expect(res.body.meta.total).toBeGreaterThanOrEqual(2);
     expect(res.body.data.every((r) => r.status === 'SCHEDULED')).toBe(true);
+  });
+
+  test('лидерборд возвращает топы тараканов и игроков', async () => {
+    const user = await registerUser();
+    const res = await request(app).get('/stats/leaderboard').set(user.auth);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.data.racers)).toBe(true);
+    expect(Array.isArray(res.body.data.players)).toBe(true);
   });
 });

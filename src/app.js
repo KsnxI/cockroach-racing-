@@ -1,4 +1,5 @@
 require('./config');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -19,9 +20,13 @@ app.use(
   })
 );
 
-app.use(helmet());
+// без upgrade-insecure-requests Safari не открывает страницу по http://localhost
+const csp = helmet.contentSecurityPolicy.getDefaultDirectives();
+delete csp['upgrade-insecure-requests'];
+app.use(helmet({ contentSecurityPolicy: { directives: csp } }));
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, '..', 'client', 'dist')));
 
 app.get('/health', (req, res) => res.json({ success: true, data: { status: 'ok' } }));
 
