@@ -5,7 +5,7 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 async function main() {
-  const bookmakerHash = await bcrypt.hash('bookmaker123', 10);
+  const bookmakerHash = await bcrypt.hash(process.env.BOOKMAKER_PASSWORD || 'bookmaker123', 10);
   const playerHash = await bcrypt.hash('password123', 10);
 
   await prisma.user.upsert({
