@@ -45,9 +45,9 @@
     "supertest": "^7.3.2"
   },
   "jest": {
-    "testEnvironment": "node",
-    "setupFilesAfterEnv": [
-      "./__tests__/setup.js"
-    ]
-  }
+  "testEnvironment": "node",
+  "globalSetup": "./__tests__/globalSetup.js",
+  "setupFilesAfterEnv": ["./__tests__/setup.js"],
+  "testMatch": ["**/__tests__/**/*.test.js"]
+}
 }
