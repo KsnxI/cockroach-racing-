@@ -383,6 +383,25 @@ module.exports = {
         responses: { 200: response('Список', listOf(ref('Transaction'))), 400: errRef('ValidationError'), 401: errRef('Unauthorized') },
       },
     },
+        '/stats/leaderboard': {
+      get: {
+        tags: ['Me'],
+        summary: 'Лидерборд: топ тараканов по победам и топ игроков по балансу (кэш Redis 30 с, заголовок X-Cache)',
+        responses: {
+          200: response(
+            'Лидерборд',
+            envelope({
+              type: 'object',
+              properties: {
+                racers: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, wins: { type: 'integer' }, races: { type: 'integer' }, owner: { type: 'object', properties: { nickname: { type: 'string' } } } } } },
+                players: { type: 'array', items: { type: 'object', properties: { nickname: { type: 'string' }, balance: { type: 'integer' } } } },
+              },
+            })
+          ),
+          401: errRef('Unauthorized'),
+        },
+      },
+    },
   },
 
   components: {

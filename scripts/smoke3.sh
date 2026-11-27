@@ -1,6 +1,6 @@
 #!/bin/bash
 H='Content-Type: application/json'
-URL=localhost:3000
+URL=${URL:-localhost:3000}
 TS=$(date +%s)
 req() { curl -s -w ' [%{http_code}]\n' "$@"; }
 j() { P="$1" node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const o=JSON.parse(s);console.log(process.env.P.split('.').reduce((a,k)=>a&&a[k],o))})"; }

@@ -30,6 +30,7 @@ app.use('/racers', require('./routes/racers'));
 app.use('/races', require('./routes/races'));
 app.use('/bets', require('./routes/bets'));
 app.use('/me', require('./routes/me'));
+app.use('/stats', require('./routes/stats'));
 
 app.use((req, res, next) => next(new ApiError(404, 'Route not found')));
 app.use(errorHandler);
