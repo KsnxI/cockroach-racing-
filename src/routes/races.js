@@ -8,6 +8,8 @@ const requireRole = require('../middleware/rbac');
 const validate = require('../middleware/validate');
 const { ApiError, asyncHandler } = require('../utils/errors');
 const { paginationSchema, buildMeta } = require('../utils/pagination');
+const { runRace } = require('../services/raceRunner');
+const { simulate } = require('../workers/simulate');
 
 const router = express.Router();
 
@@ -219,6 +221,70 @@ router.post(
       data: { status: 'BETTING_OPEN', seed, seedHash },
     });
     res.json({ success: true, data: publicRace(updated) });
+  })
+);
+
+// собирает результат заезда и проверяет честность
+async function buildResult(id) {
+  const race = await prisma.race.findUnique({
+    where: { id },
+    include: {
+      entries: {
+        include: { racer: { select: { id: true, name: true } } },
+        orderBy: { position: 'asc' },
+      },
+    },
+  });
+  if (!race) throw new ApiError(404, 'Race not found');
+  if (race.status !== 'FINISHED') throw new ApiError(409, 'Race is not finished yet');
+
+  // 1) хеш seed совпадает с тем, что был опубликован до заезда
+  const seedMatchesHash = crypto.createHash('sha256').update(race.seed).digest('hex') === race.seedHash;
+
+  // 2) повторная симуляция по seed и снимку даёт те же позиции
+  const replay = simulate(race.commentary.snapshot, race.seed);
+  const replayMatches = replay.results.every(
+    (r) => race.entries.find((e) => e.id === r.entryId)?.position === r.position
+  );
+
+  return {
+    raceId: race.id,
+    title: race.title,
+    seedHash: race.seedHash,
+    seed: race.seed,
+    standings: race.entries.map((e) => ({
+      position: e.position,
+      entryId: e.id,
+      racer: e.racer,
+      odds: e.odds,
+      finishTime: e.finishTime / 100,
+    })),
+    commentary: race.commentary.lines,
+    verification: { seedMatchesHash, replayMatches },
+  };
+}
+
+// запустить заезд вручную (позже это будет делать воркер)
+router.post(
+  '/:id/run',
+  auth,
+  requireRole('BOOKMAKER'),
+  asyncHandler(async (req, res) => {
+    await getCreatedRace(req.params.id, req.user.id);
+    const outcome = await runRace(req.params.id);
+    if (outcome.cancelled) {
+      return res.json({ success: true, data: { status: 'CANCELLED', message: 'Not enough racers, bets refunded' } });
+    }
+    res.json({ success: true, data: await buildResult(req.params.id) });
+  })
+);
+
+// результат: позиции, комментарий, раскрытый seed и проверка честности
+router.get(
+  '/:id/result',
+  auth,
+  asyncHandler(async (req, res) => {
+    res.json({ success: true, data: await buildResult(req.params.id) });
   })
 );
 
